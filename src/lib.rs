@@ -81,6 +81,22 @@ impl ThesaurusEngine {
         }
     }
 
+    /// Replace the data directory and re-probe install state.
+    ///
+    /// Call this from `setup()` once the app handle is available, passing the
+    /// bundle-scoped per-user application-data directory resolved via
+    /// `app.path().app_data_dir()`. The engine uses `data_dir` directly (no
+    /// sub-directory append); the caller is responsible for any sub-path.
+    pub fn set_data_dir(&self, data_dir: PathBuf) {
+        let mut inner = self.inner.lock().unwrap();
+        inner.config.data_dir = data_dir;
+        inner.state = if state::is_installed_for(&inner.config) {
+            ThesaurusState::Ready
+        } else {
+            ThesaurusState::NotInstalled
+        };
+    }
+
     pub fn state(&self) -> ThesaurusState {
         self.inner.lock().unwrap().state.clone()
     }

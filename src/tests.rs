@@ -147,6 +147,36 @@ fn test_synonyms_not_ready_returns_empty() {
     assert!(result.is_empty());
 }
 
+// set_data_dir updates path and re-probes state
+#[test]
+fn test_set_data_dir_updates_path_and_state() {
+    let dir1 = tempdir().unwrap();
+    let dir2 = tempdir().unwrap();
+
+    // Write a valid DB in dir2
+    write_fixture_db(dir2.path(), "es");
+
+    let config = EngineConfig {
+        data_dir: dir1.path().to_path_buf(),
+        lang: "es".into(),
+        source_url: "http://example.com".into(),
+        source_sha256: "fixture".into(),
+    };
+    let engine = ThesaurusEngine::new(config);
+    // dir1 has no DB → NotInstalled
+    assert_eq!(engine.state(), ThesaurusState::NotInstalled);
+
+    // Redirect to dir2 which has the fixture DB
+    engine.set_data_dir(dir2.path().to_path_buf());
+    assert_eq!(engine.state(), ThesaurusState::Ready);
+    assert!(engine.is_installed());
+
+    // Redirect back to an empty dir → NotInstalled again
+    let dir3 = tempdir().unwrap();
+    engine.set_data_dir(dir3.path().to_path_buf());
+    assert_eq!(engine.state(), ThesaurusState::NotInstalled);
+}
+
 // 6.4 Integration test (ignored — needs network)
 #[tokio::test]
 #[ignore]
