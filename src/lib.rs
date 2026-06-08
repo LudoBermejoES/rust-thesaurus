@@ -81,6 +81,11 @@ impl ThesaurusEngine {
         }
     }
 
+    /// Returns the current data directory used by this engine.
+    pub fn data_dir(&self) -> PathBuf {
+        self.inner.lock().unwrap().config.data_dir.clone()
+    }
+
     /// Replace the data directory and re-probe install state.
     ///
     /// Call this from `setup()` once the app handle is available, passing the
