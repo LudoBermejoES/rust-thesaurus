@@ -88,9 +88,16 @@ pub async fn run(
     set_state(&inner, ThesaurusState::Indexing);
     on_progress(ThesaurusState::Indexing);
 
-    // Remove stale db if present
-    if db_path.exists() {
-        std::fs::remove_file(&db_path)?;
+    // Remove stale db (and its WAL/SHM sidecars) if present, so a rebuild
+    // never recovers from a half-written WAL left by an interrupted install.
+    for p in [
+        db_path.clone(),
+        db_path.with_extension("db-wal"),
+        db_path.with_extension("db-shm"),
+    ] {
+        if p.exists() {
+            std::fs::remove_file(&p)?;
+        }
     }
 
     let entries: Result<Vec<_>> = {
