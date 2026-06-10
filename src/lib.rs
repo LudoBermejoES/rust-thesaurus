@@ -43,7 +43,7 @@ impl EngineConfig {
             data_dir,
             lang: "es".into(),
             source_url: "https://raw.githubusercontent.com/LudoBermejoES/corylus-thesaurus/master/thesaurus/derived/es_synonyms.jsonl.gz".into(),
-            source_sha256: "10f85fb3360e3a97ec1631ab3fdbfa013ef986012c373f0e74c0ee49d93b20ef".into(),
+            source_sha256: "e76ec2da6eb60bf0896ae652a994002f5af552f11c13601e5d3a9fc90e63efc4".into(),
         }
     }
 }
