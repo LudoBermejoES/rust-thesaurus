@@ -27,6 +27,11 @@ pub struct ThesaurusSense {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ThesaurusEntry {
     pub word: String,
+    /// Set by the command layer when senses came from the lemma rather than the
+    /// surface word. `crate::lookup` always returns `None` — the crate is
+    /// lemmatizer-agnostic; provenance is the command's responsibility.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lemma: Option<String>,
     pub senses: Vec<ThesaurusSense>,
 }
 
@@ -139,7 +144,7 @@ impl ThesaurusEngine {
     pub fn lookup(&self, word: &str) -> Result<ThesaurusEntry> {
         let inner = self.inner.lock().unwrap();
         if !matches!(inner.state, ThesaurusState::Ready) {
-            return Ok(ThesaurusEntry { word: word.to_string(), senses: vec![] });
+            return Ok(ThesaurusEntry { word: word.to_string(), lemma: None, senses: vec![] });
         }
         let db_path = state::db_path(&inner.config);
         drop(inner);

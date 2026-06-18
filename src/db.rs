@@ -126,7 +126,7 @@ pub fn lookup(db_path: &Path, word: &str) -> Result<ThesaurusEntry> {
         });
     }
 
-    Ok(ThesaurusEntry { word: canonical, senses })
+    Ok(ThesaurusEntry { word: canonical, lemma: None, senses })
 }
 
 /// Flat distinct synonyms for a word (menu path — ignores sense structure).
