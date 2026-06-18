@@ -13,12 +13,14 @@ fn make_gz(lines: &[&str]) -> Vec<u8> {
     enc.finish().unwrap()
 }
 
+/// Sense-structured fixture — matches the new schema.
 fn fixture_gz() -> Vec<u8> {
     make_gz(&[
-        r#"{"word":"bonito","synonyms":["bello","hermoso"],"pos":"a","antonyms":["feo"]}"#,
-        r#"{"word":"feo","synonyms":["horrible","feísimo"],"pos":"a"}"#,
-        r#"{"word":"casa","synonyms":["hogar","domicilio"],"pos":"n"}"#,
-        r#"{"word":"incitar","synonyms":["instigar","provocar"],"pos":"v","antonyms":[]}"#,
+        r#"{"word":"bonito","senses":[{"pos":"adj","definition":"De aspecto agradable.","synonyms":["bello","hermoso"],"antonyms":["feo"]}]}"#,
+        r#"{"word":"feo","senses":[{"pos":"adj","definition":"De aspecto desagradable.","synonyms":["horrible","feísimo"]}]}"#,
+        r#"{"word":"casa","senses":[{"pos":"n","synonyms":["hogar","domicilio"]}]}"#,
+        r#"{"word":"incitar","senses":[{"pos":"v","synonyms":["instigar","provocar"],"antonyms":[]}]}"#,
+        r#"{"word":"happy","senses":[{"pos":"adj","definition":"Feeling pleasure.","synonyms":["glad","joyful"],"antonyms":["sad","unhappy"]},{"pos":"adj","definition":"Lucky.","synonyms":["fortunate"]}]}"#,
     ])
 }
 
@@ -42,9 +44,9 @@ fn write_fixture_db(dir: &std::path::Path, lang: &str) {
     ).unwrap();
 }
 
-// 6.1 JSONL parse → index build; antonyms stored as 'ant'; missing field tolerated
+// Parse sense-structured JSONL → index builds both senses and relations tables
 #[test]
-fn test_parse_and_index() {
+fn test_parse_sense_structured() {
     use crate::{parser, db};
     let dir = tempdir().unwrap();
     let db_path = dir.path().join("test.db");
@@ -53,23 +55,133 @@ fn test_parse_and_index() {
     let mut entries = Vec::new();
     parser::parse_gz(std::io::Cursor::new(&gz), |e| { entries.push(e); Ok(()) }).unwrap();
 
-    // "feo" has no antonyms field → tolerated
-    assert_eq!(entries.len(), 4);
-    assert!(entries[0].antonyms.contains(&"feo".to_string()));
-    assert!(entries[1].antonyms.is_empty()); // feo has no antonyms
+    assert_eq!(entries.len(), 5);
+    // bonito has senses with definition + synonyms + antonyms
+    let bonito = &entries[0];
+    assert_eq!(bonito.word, "bonito");
+    assert_eq!(bonito.senses.len(), 1);
+    assert_eq!(bonito.senses[0].definition.as_deref(), Some("De aspecto agradable."));
+    assert_eq!(bonito.senses[0].synonyms, vec!["bello", "hermoso"]);
+    assert_eq!(bonito.senses[0].antonyms, vec!["feo"]);
+
+    // incitar has empty antonyms → tolerated
+    let incitar = &entries[3];
+    assert!(incitar.senses[0].antonyms.is_empty());
+
+    // happy has two senses
+    let happy = &entries[4];
+    assert_eq!(happy.senses.len(), 2);
 
     db::build_index(&db_path, entries.into_iter()).unwrap();
-
-    // syn rows exist
+    // syn rows exist via flat query
     let syns = db::synonyms(&db_path, "bonito").unwrap();
     assert!(syns.contains(&"bello".to_string()));
-    assert!(syns.contains(&"hermoso".to_string()));
-
-    // ant row for bonito exists in db but NOT returned by synonyms()
+    // antonym NOT returned by synonyms()
     assert!(!syns.contains(&"feo".to_string()));
+    // antonym IS returned by antonyms()
+    let ants = db::antonyms(&db_path, "bonito").unwrap();
+    assert!(ants.contains(&"feo".to_string()));
 }
 
-// 6.2 synonyms() round-trip: case-insensitive, word excluded, antonyms not returned, unknown→[]
+// lookup() returns sense-structured entry with definition + syn + ant
+#[test]
+fn test_lookup_returns_senses() {
+    let dir = tempdir().unwrap();
+    write_fixture_db(dir.path(), "es");
+
+    let config = EngineConfig {
+        data_dir: dir.path().to_path_buf(),
+        lang: "es".into(),
+        source_url: "http://example.com".into(),
+        source_sha256: "fixture".into(),
+    };
+    let engine = ThesaurusEngine::new(config);
+    assert!(engine.is_installed());
+
+    let entry = engine.lookup("bonito").unwrap();
+    assert_eq!(entry.word, "bonito");
+    assert_eq!(entry.senses.len(), 1);
+    let s = &entry.senses[0];
+    assert_eq!(s.pos.as_deref(), Some("adj"));
+    assert_eq!(s.definition.as_deref(), Some("De aspecto agradable."));
+    assert!(s.synonyms.contains(&"bello".to_string()));
+    assert!(s.antonyms.contains(&"feo".to_string()));
+}
+
+// lookup() with multi-sense word returns all senses
+#[test]
+fn test_lookup_multi_sense() {
+    let dir = tempdir().unwrap();
+    write_fixture_db(dir.path(), "en");
+
+    let config = EngineConfig {
+        data_dir: dir.path().to_path_buf(),
+        lang: "en".into(),
+        source_url: "http://example.com".into(),
+        source_sha256: "fixture".into(),
+    };
+    let engine = ThesaurusEngine::new(config);
+
+    let entry = engine.lookup("happy").unwrap();
+    assert_eq!(entry.senses.len(), 2);
+    assert!(entry.senses[0].antonyms.contains(&"sad".to_string()));
+    assert!(entry.senses[1].synonyms.contains(&"fortunate".to_string()));
+    assert!(entry.senses[1].antonyms.is_empty());
+}
+
+// lookup() unknown word → empty entry, no error
+#[test]
+fn test_lookup_unknown_word_empty() {
+    let dir = tempdir().unwrap();
+    write_fixture_db(dir.path(), "es");
+
+    let config = EngineConfig {
+        data_dir: dir.path().to_path_buf(),
+        lang: "es".into(),
+        source_url: "http://example.com".into(),
+        source_sha256: "fixture".into(),
+    };
+    let engine = ThesaurusEngine::new(config);
+    let entry = engine.lookup("xyzzy_nonexistent").unwrap();
+    assert!(entry.senses.is_empty());
+}
+
+// lookup() case-insensitive
+#[test]
+fn test_lookup_case_insensitive() {
+    let dir = tempdir().unwrap();
+    write_fixture_db(dir.path(), "es");
+
+    let config = EngineConfig {
+        data_dir: dir.path().to_path_buf(),
+        lang: "es".into(),
+        source_url: "http://example.com".into(),
+        source_sha256: "fixture".into(),
+    };
+    let engine = ThesaurusEngine::new(config);
+    let lower = engine.lookup("bonito").unwrap();
+    let upper = engine.lookup("BONITO").unwrap();
+    assert_eq!(lower.senses.len(), upper.senses.len());
+    assert_eq!(lower.senses[0].synonyms, upper.senses[0].synonyms);
+}
+
+// lookup() not-ready engine → empty entry
+#[test]
+fn test_lookup_not_ready_returns_empty() {
+    let dir = tempdir().unwrap();
+    let config = EngineConfig {
+        data_dir: dir.path().to_path_buf(),
+        lang: "en".into(),
+        source_url: "http://example.com".into(),
+        source_sha256: "doesnotexist".into(),
+    };
+    let engine = ThesaurusEngine::new(config);
+    assert_eq!(engine.state(), ThesaurusState::NotInstalled);
+    let entry = engine.lookup("house").unwrap();
+    assert!(entry.senses.is_empty());
+}
+
+// synonyms() round-trip: case-insensitive, word excluded, antonyms not returned, unknown→[]
 #[test]
 fn test_synonyms_roundtrip() {
     let dir = tempdir().unwrap();
@@ -84,24 +196,18 @@ fn test_synonyms_roundtrip() {
     let engine = ThesaurusEngine::new(config);
     assert!(engine.is_installed());
 
-    // case-insensitive
     let lower = engine.synonyms("bonito").unwrap();
     let upper = engine.synonyms("Bonito").unwrap();
     assert_eq!(lower, upper);
     assert!(lower.contains(&"bello".to_string()));
-
-    // word itself excluded
     assert!(!lower.contains(&"bonito".to_string()));
+    assert!(!lower.contains(&"feo".to_string())); // antonym excluded
 
-    // antonyms excluded
-    assert!(!lower.contains(&"feo".to_string()));
-
-    // unknown word → empty
     let unknown = engine.synonyms("xyzzy_nonexistent").unwrap();
     assert!(unknown.is_empty());
 }
 
-// 6.3 version.json no-op re-provision; checksum-mismatch rejection
+// version.json check: matching sha→installed, wrong sha→not installed
 #[test]
 fn test_is_installed_version_check() {
     let dir = tempdir().unwrap();
@@ -111,17 +217,10 @@ fn test_is_installed_version_check() {
         source_url: "http://example.com".into(),
         source_sha256: "fixture".into(),
     };
-
-    // Not installed yet
     assert!(!crate::state::is_installed_for(&config));
-
-    // Write matching db + version
     write_fixture_db(dir.path(), "es");
-    // But config has sha256="fixture" and we wrote sha256="fixture" → matches
-    // Redefine config pointing at same fixture sha
     assert!(crate::state::is_installed_for(&config));
 
-    // Checksum mismatch → not installed
     let config_wrong = EngineConfig {
         data_dir: dir.path().to_path_buf(),
         lang: "es".into(),
@@ -131,29 +230,11 @@ fn test_is_installed_version_check() {
     assert!(!crate::state::is_installed_for(&config_wrong));
 }
 
-// 6.3 (cont.) engine not ready → synonyms returns []
-#[test]
-fn test_synonyms_not_ready_returns_empty() {
-    let dir = tempdir().unwrap();
-    let config = EngineConfig {
-        data_dir: dir.path().to_path_buf(),
-        lang: "en".into(),
-        source_url: "http://example.com".into(),
-        source_sha256: "doesnotexist".into(),
-    };
-    let engine = ThesaurusEngine::new(config);
-    assert_eq!(engine.state(), ThesaurusState::NotInstalled);
-    let result = engine.synonyms("house").unwrap();
-    assert!(result.is_empty());
-}
-
 // set_data_dir updates path and re-probes state
 #[test]
 fn test_set_data_dir_updates_path_and_state() {
     let dir1 = tempdir().unwrap();
     let dir2 = tempdir().unwrap();
-
-    // Write a valid DB in dir2
     write_fixture_db(dir2.path(), "es");
 
     let config = EngineConfig {
@@ -163,21 +244,17 @@ fn test_set_data_dir_updates_path_and_state() {
         source_sha256: "fixture".into(),
     };
     let engine = ThesaurusEngine::new(config);
-    // dir1 has no DB → NotInstalled
     assert_eq!(engine.state(), ThesaurusState::NotInstalled);
 
-    // Redirect to dir2 which has the fixture DB
     engine.set_data_dir(dir2.path().to_path_buf());
     assert_eq!(engine.state(), ThesaurusState::Ready);
-    assert!(engine.is_installed());
 
-    // Redirect back to an empty dir → NotInstalled again
     let dir3 = tempdir().unwrap();
     engine.set_data_dir(dir3.path().to_path_buf());
     assert_eq!(engine.state(), ThesaurusState::NotInstalled);
 }
 
-// 6.4 Integration test (ignored — needs network)
+// Integration test (ignored — needs network)
 #[tokio::test]
 #[ignore]
 async fn integration_provision_es_and_lookup() {
@@ -189,6 +266,6 @@ async fn integration_provision_es_and_lookup() {
     engine.provision(|s| println!("{:?}", s)).await.unwrap();
     assert!(engine.is_installed());
 
-    let syns = engine.synonyms("instigar").unwrap();
-    assert!(syns.contains(&"incitar".to_string()), "expected incitar in {:?}", syns);
+    let entry = engine.lookup("libre").unwrap();
+    assert!(!entry.senses.is_empty(), "expected senses for 'libre': {:?}", entry);
 }

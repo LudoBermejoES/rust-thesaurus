@@ -14,6 +14,22 @@ use std::sync::{Arc, Mutex};
 
 pub type Result<T> = std::result::Result<T, ThesaurusError>;
 
+/// One word-sense returned by `lookup`.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ThesaurusSense {
+    pub pos: Option<String>,
+    pub definition: Option<String>,
+    pub synonyms: Vec<String>,
+    pub antonyms: Vec<String>,
+}
+
+/// Sense-structured lookup result returned by `ThesaurusEngine::lookup`.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ThesaurusEntry {
+    pub word: String,
+    pub senses: Vec<ThesaurusSense>,
+}
+
 /// Configuration for one language's thesaurus engine.
 pub struct EngineConfig {
     /// Directory where per-language .db and .version.json files are stored.
@@ -28,22 +44,24 @@ pub struct EngineConfig {
 
 impl EngineConfig {
     /// Default config for English using the corylus-thesaurus public repo.
+    /// SHA-256 is updated once the new sense-structured artifact is published (task 3.4).
     pub fn default_en(data_dir: PathBuf) -> Self {
         Self {
             data_dir,
             lang: "en".into(),
-            source_url: "https://raw.githubusercontent.com/LudoBermejoES/corylus-thesaurus/master/thesaurus/derived/en_synonyms.jsonl.gz".into(),
-            source_sha256: "20190ad431107215dccd234f0787fbcf7edb14e0c389fb507a72891aab673f23".into(),
+            source_url: "https://raw.githubusercontent.com/LudoBermejoES/corylus-thesaurus/master/thesaurus/derived/en_dict.jsonl.gz".into(),
+            source_sha256: "37b0cbc8fd61cb7f2d809ab563b937b58d8c5ae63bb3a7c1b88e22ae58d9439c".into(),
         }
     }
 
     /// Default config for Spanish using the corylus-thesaurus public repo.
+    /// SHA-256 is updated once the new sense-structured artifact is published (task 3.4).
     pub fn default_es(data_dir: PathBuf) -> Self {
         Self {
             data_dir,
             lang: "es".into(),
-            source_url: "https://raw.githubusercontent.com/LudoBermejoES/corylus-thesaurus/master/thesaurus/derived/es_synonyms.jsonl.gz".into(),
-            source_sha256: "e76ec2da6eb60bf0896ae652a994002f5af552f11c13601e5d3a9fc90e63efc4".into(),
+            source_url: "https://raw.githubusercontent.com/LudoBermejoES/corylus-thesaurus/master/thesaurus/derived/es_dict.jsonl.gz".into(),
+            source_sha256: "442b4a5dad1f3029c8af1b252e98f00598114a3fbdf59195ab1f010af381e361".into(),
         }
     }
 }
@@ -116,8 +134,19 @@ impl ThesaurusEngine {
         provision::run(self.inner.clone(), on_progress).await
     }
 
-    /// Synchronous case-insensitive synonym lookup.
-    /// Returns `[]` for unknown words or when not installed.
+    /// Sense-structured lookup. Returns an entry with empty senses for unknown
+    /// words or when the engine is not ready — never errors on a miss.
+    pub fn lookup(&self, word: &str) -> Result<ThesaurusEntry> {
+        let inner = self.inner.lock().unwrap();
+        if !matches!(inner.state, ThesaurusState::Ready) {
+            return Ok(ThesaurusEntry { word: word.to_string(), senses: vec![] });
+        }
+        let db_path = state::db_path(&inner.config);
+        drop(inner);
+        db::lookup(&db_path, word)
+    }
+
+    /// Flat distinct synonym list (menu path). Returns `[]` when not ready.
     pub fn synonyms(&self, word: &str) -> Result<Vec<String>> {
         let inner = self.inner.lock().unwrap();
         if !matches!(inner.state, ThesaurusState::Ready) {

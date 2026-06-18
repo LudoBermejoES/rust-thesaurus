@@ -3,13 +3,26 @@ use flate2::read::GzDecoder;
 use serde::Deserialize;
 use crate::{Result, ThesaurusError};
 
-#[derive(Deserialize)]
-pub struct JsonlEntry {
-    pub word: String,
-    pub synonyms: Vec<String>,
+/// One word-sense from the sense-structured JSONL artifact.
+#[derive(Deserialize, Debug, Clone)]
+pub struct JsonlSense {
+    #[serde(default)]
     pub pos: Option<String>,
     #[serde(default)]
+    pub definition: Option<String>,
+    #[serde(default)]
+    pub synonyms: Vec<String>,
+    #[serde(default)]
     pub antonyms: Vec<String>,
+}
+
+/// One entry from the sense-structured JSONL artifact.
+/// Schema: `{ "word": "...", "senses": [ { "pos", "definition", "synonyms", "antonyms" } ] }`
+#[derive(Deserialize, Debug, Clone)]
+pub struct JsonlEntry {
+    pub word: String,
+    #[serde(default)]
+    pub senses: Vec<JsonlSense>,
 }
 
 /// Parse a gzipped JSONL file, calling `on_entry` for each valid line.

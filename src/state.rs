@@ -21,7 +21,7 @@ pub struct VersionFile {
     pub schema_version: u32,
 }
 
-pub const SCHEMA_VERSION: u32 = 1;
+pub const SCHEMA_VERSION: u32 = 2;
 
 pub fn is_installed_for(config: &EngineConfig) -> bool {
     let db = db_path(config);
