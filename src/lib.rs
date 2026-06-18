@@ -55,13 +55,13 @@ impl EngineConfig {
     }
 
     /// Default config for Spanish using the corylus-thesaurus public repo.
-    /// SHA-256 is updated once the new sense-structured artifact is published (task 3.4).
+    /// Source: Spanish Wiktionary edition (eswiktionary via Kaikki) — definitions in Spanish.
     pub fn default_es(data_dir: PathBuf) -> Self {
         Self {
             data_dir,
             lang: "es".into(),
             source_url: "https://raw.githubusercontent.com/LudoBermejoES/corylus-thesaurus/master/thesaurus/derived/es_dict.jsonl.gz".into(),
-            source_sha256: "442b4a5dad1f3029c8af1b252e98f00598114a3fbdf59195ab1f010af381e361".into(),
+            source_sha256: "0241a4bfedbd30c6664a4e11c93ebc1be57c0f013d593720df0393fac2545818".into(),
         }
     }
 }
