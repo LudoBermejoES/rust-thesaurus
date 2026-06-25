@@ -141,6 +141,9 @@ pub fn synonyms(db_path: &Path, word: &str) -> Result<Vec<String>> {
 }
 
 /// Flat distinct antonyms for a word (menu path — ignores sense structure).
+/// Public query API; not yet called by the embedder but kept for parity with
+/// the synonym lookups.
+#[allow(dead_code)]
 pub fn antonyms(db_path: &Path, word: &str) -> Result<Vec<String>> {
     let conn = Connection::open(db_path)?;
     let mut stmt = conn.prepare(
