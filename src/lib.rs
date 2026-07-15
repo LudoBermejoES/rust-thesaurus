@@ -1,8 +1,8 @@
 mod error;
 mod provision;
-mod parser;
-mod db;
-mod state;
+pub mod parser;
+pub mod db;
+pub mod state;
 
 #[cfg(test)]
 mod tests;
@@ -160,5 +160,20 @@ impl ThesaurusEngine {
         let db_path = state::db_path(&inner.config);
         drop(inner);
         db::synonyms(&db_path, word)
+    }
+
+    /// Batch membership: the subset of `words` the data recognizes (indexed,
+    /// case-insensitive). Returns an EMPTY set when the engine is not ready —
+    /// and does NOT open the database in that case, so a caller that gates on
+    /// `is_installed()` and a caller that relies on this early-return both avoid
+    /// any query when the thesaurus is absent. Used by the spellcheck cross-check.
+    pub fn contains_any(&self, words: &[String]) -> Result<std::collections::HashSet<String>> {
+        let inner = self.inner.lock().unwrap();
+        if !matches!(inner.state, ThesaurusState::Ready) {
+            return Ok(std::collections::HashSet::new());
+        }
+        let db_path = state::db_path(&inner.config);
+        drop(inner);
+        db::contains_any(&db_path, words)
     }
 }

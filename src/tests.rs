@@ -255,6 +255,68 @@ fn test_set_data_dir_updates_path_and_state() {
 }
 
 // Integration test (ignored — needs network)
+// contains_any: known words returned (incl. relations-only words), unknown
+// omitted, case-insensitive, single-connection batch.
+#[test]
+fn test_contains_any_membership() {
+    let dir = tempdir().unwrap();
+    write_fixture_db(dir.path(), "es");
+    let config = EngineConfig {
+        data_dir: dir.path().to_path_buf(),
+        lang: "es".into(),
+        source_url: "http://example.com".into(),
+        source_sha256: "fixture".into(),
+    };
+    let engine = ThesaurusEngine::new(config);
+    assert!(engine.is_installed());
+
+    let query = vec![
+        "bonito".to_string(),       // present (has senses + relations)
+        "casa".to_string(),         // present via relations only (no definition row)
+        "Feo".to_string(),          // present, case-insensitive
+        "xyzzy_nope".to_string(),   // absent
+    ];
+    let found = engine.contains_any(&query).unwrap();
+    assert!(found.contains("bonito"));
+    assert!(found.contains("casa"), "a relations-only word must count as known");
+    assert!(found.contains("Feo"), "membership must be case-insensitive");
+    assert!(!found.contains("xyzzy_nope"));
+    assert_eq!(found.len(), 3);
+}
+
+// contains_any: an empty input touches nothing and returns empty.
+#[test]
+fn test_contains_any_empty_input() {
+    let dir = tempdir().unwrap();
+    write_fixture_db(dir.path(), "es");
+    let config = EngineConfig {
+        data_dir: dir.path().to_path_buf(),
+        lang: "es".into(),
+        source_url: "http://example.com".into(),
+        source_sha256: "fixture".into(),
+    };
+    let engine = ThesaurusEngine::new(config);
+    assert!(engine.contains_any(&[]).unwrap().is_empty());
+}
+
+// contains_any: a not-ready engine returns an empty set without a DB (the
+// spellcheck cross-check relies on this to never query when the thesaurus is
+// not installed).
+#[test]
+fn test_contains_any_not_ready_returns_empty() {
+    let dir = tempdir().unwrap(); // empty dir → engine not installed/ready
+    let config = EngineConfig {
+        data_dir: dir.path().to_path_buf(),
+        lang: "es".into(),
+        source_url: "http://example.com".into(),
+        source_sha256: "fixture".into(),
+    };
+    let engine = ThesaurusEngine::new(config);
+    assert!(!engine.is_installed());
+    let found = engine.contains_any(&["bonito".to_string(), "casa".to_string()]).unwrap();
+    assert!(found.is_empty());
+}
+
 #[tokio::test]
 #[ignore]
 async fn integration_provision_es_and_lookup() {

@@ -129,6 +129,39 @@ pub fn lookup(db_path: &Path, word: &str) -> Result<ThesaurusEntry> {
     Ok(ThesaurusEntry { word: canonical, lemma: None, senses })
 }
 
+/// Batch membership test: given a set of surface words, return the subset the
+/// data recognizes (a word appears as an indexed `word` entry in `senses` or
+/// `relations`), matched case-insensitively. Opens ONE connection and runs a
+/// single indexed query rather than one lookup per word — this is the cheap
+/// "is this a real word?" test used by the spellcheck cross-check.
+///
+/// Returns the caller's own surface forms (not the stored casing) so results
+/// map back to the input directly. An empty input yields an empty set without
+/// touching the database.
+pub fn contains_any(db_path: &Path, words: &[String]) -> Result<std::collections::HashSet<String>> {
+    let mut found = std::collections::HashSet::new();
+    if words.is_empty() {
+        return Ok(found);
+    }
+    let conn = Connection::open(db_path)?;
+    // For each input word, check membership with a single indexed (COLLATE
+    // NOCASE) probe against both tables. The indices `idx_word` /
+    // `idx_senses_word` make each probe sub-millisecond; the loop shares one
+    // connection (no per-word connection open). `EXISTS` short-circuits.
+    let mut stmt = conn.prepare(
+        "SELECT \
+             EXISTS(SELECT 1 FROM relations WHERE word = ?1 COLLATE NOCASE) \
+             OR EXISTS(SELECT 1 FROM senses WHERE word = ?1 COLLATE NOCASE)",
+    )?;
+    for w in words {
+        let present: bool = stmt.query_row(params![w], |row| row.get::<_, i64>(0))? != 0;
+        if present {
+            found.insert(w.clone());
+        }
+    }
+    Ok(found)
+}
+
 /// Flat distinct synonyms for a word (menu path — ignores sense structure).
 pub fn synonyms(db_path: &Path, word: &str) -> Result<Vec<String>> {
     let conn = Connection::open(db_path)?;
