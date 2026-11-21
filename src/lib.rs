@@ -49,13 +49,13 @@ pub struct EngineConfig {
 
 impl EngineConfig {
     /// Default config for English using the corylus-thesaurus public repo.
-    /// SHA-256 is updated once the new sense-structured artifact is published (task 3.4).
+    /// Source: Open English WordNet + English Wiktionary + Moby (see corylus-thesaurus ATTRIBUTION.md).
     pub fn default_en(data_dir: PathBuf) -> Self {
         Self {
             data_dir,
             lang: "en".into(),
-            source_url: "https://raw.githubusercontent.com/LudoBermejoES/corylus-thesaurus/master/thesaurus/derived/en_dict.jsonl.gz".into(),
-            source_sha256: "37b0cbc8fd61cb7f2d809ab563b937b58d8c5ae63bb3a7c1b88e22ae58d9439c".into(),
+            source_url: "https://raw.githubusercontent.com/LudoBermejoES/corylus-thesaurus/master/thesaurus/derived/en_dict_v2.jsonl.gz".into(),
+            source_sha256: "db0c78b48e7a70b14e26da4dfb15e691766537d1b14de8f9aa38e3dfc596b045".into(),
         }
     }
 
