@@ -165,6 +165,38 @@ fn test_lookup_case_insensitive() {
     assert_eq!(lower.senses[0].synonyms, upper.senses[0].synonyms);
 }
 
+// lookup() must not merge case variants: "Light" (names) and "light" both
+// start at sense_idx 0, so a case-insensitive merge showed the surname and
+// place-name definitions on "light"'s senses.
+#[test]
+fn test_lookup_does_not_merge_case_variants() {
+    use crate::{parser, db};
+    let dir = tempdir().unwrap();
+    let db_path = dir.path().join("en.db");
+    let gz = make_gz(&[
+        r#"{"word":"Light","senses":[{"pos":"name","definition":"A surname."},{"pos":"name","definition":"A place name."}]}"#,
+        r#"{"word":"light","senses":[{"pos":"n","definition":"Visible radiation.","synonyms":["illumination"]},{"pos":"adj","definition":"Not heavy.","synonyms":["weightless"]}]}"#,
+    ]);
+    let mut entries = Vec::new();
+    parser::parse_gz(std::io::Cursor::new(&gz), |e| { entries.push(e); Ok(()) }).unwrap();
+    db::build_index(&db_path, entries.into_iter()).unwrap();
+
+    for query in ["light", "LIGHT"] {
+        let e = db::lookup(&db_path, query).unwrap();
+        assert_eq!(e.word, "light");
+        let defs: Vec<_> = e.senses.iter().map(|s| s.definition.as_deref().unwrap()).collect();
+        assert_eq!(defs, vec!["Visible radiation.", "Not heavy."]);
+        assert_eq!(e.senses[0].synonyms, vec!["illumination"]);
+        assert_eq!(e.senses[1].pos.as_deref(), Some("adj"));
+    }
+
+    let proper = db::lookup(&db_path, "Light").unwrap();
+    assert_eq!(proper.word, "Light");
+    assert_eq!(proper.senses.len(), 2);
+    assert_eq!(proper.senses[0].definition.as_deref(), Some("A surname."));
+    assert!(proper.senses.iter().all(|s| s.synonyms.is_empty()));
+}
+
 // lookup() not-ready engine → empty entry
 #[test]
 fn test_lookup_not_ready_returns_empty() {

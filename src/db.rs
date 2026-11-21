@@ -1,5 +1,5 @@
 use std::path::Path;
-use rusqlite::{Connection, params};
+use rusqlite::{Connection, OptionalExtension, params};
 use crate::{Result, parser::JsonlEntry, ThesaurusSense, ThesaurusEntry};
 
 pub fn build_index(db_path: &Path, entries: impl Iterator<Item = JsonlEntry>) -> Result<()> {
@@ -70,25 +70,35 @@ pub fn build_index(db_path: &Path, entries: impl Iterator<Item = JsonlEntry>) ->
 pub fn lookup(db_path: &Path, word: &str) -> Result<ThesaurusEntry> {
     let conn = Connection::open(db_path)?;
 
-    // Get all distinct sense_idx values for this word (from both tables)
+    // Several entries can match case-insensitively — "Light" (a surname and
+    // place names) and "light" — and their sense_idx values overlap, so merging
+    // them mixes one entry's definitions into the other's senses. Pick ONE
+    // entry: the exact casing, else the lowercase form, else any match.
+    let canonical: Option<String> = conn.query_row(
+        "SELECT word FROM (
+             SELECT word FROM senses WHERE word = ?1 COLLATE NOCASE
+             UNION
+             SELECT word FROM relations WHERE word = ?1 COLLATE NOCASE)
+         ORDER BY word = ?1 DESC, word = ?2 DESC, word LIMIT 1",
+        params![word, word.to_lowercase()],
+        |r| r.get(0),
+    ).optional()?;
+    let Some(canonical) = canonical else {
+        return Ok(ThesaurusEntry { word: word.to_string(), lemma: None, senses: Vec::new() });
+    };
+    let word = canonical.as_str();
+
+    // `word = ?1 COLLATE NOCASE` uses the NOCASE index; `word = ?1` then keeps
+    // only the chosen entry's exact casing.
     let mut idx_stmt = conn.prepare(
-        "SELECT DISTINCT sense_idx FROM relations WHERE word = ?1 COLLATE NOCASE
+        "SELECT DISTINCT sense_idx FROM relations WHERE word = ?1 COLLATE NOCASE AND word = ?1
          UNION
-         SELECT DISTINCT sense_idx FROM senses WHERE word = ?1 COLLATE NOCASE
+         SELECT DISTINCT sense_idx FROM senses WHERE word = ?1 COLLATE NOCASE AND word = ?1
          ORDER BY sense_idx"
     )?;
     let sense_indices: Vec<i64> = idx_stmt
         .query_map(params![word], |row| row.get(0))?
         .collect::<std::result::Result<_, _>>()?;
-
-    // Resolve canonical casing from the DB
-    let canonical: String = {
-        let mut stmt = conn.prepare(
-            "SELECT word FROM relations WHERE word = ?1 COLLATE NOCASE LIMIT 1"
-        )?;
-        stmt.query_row(params![word], |r| r.get(0))
-            .unwrap_or_else(|_| word.to_string())
-    };
 
     let mut senses: Vec<ThesaurusSense> = Vec::new();
 
@@ -96,7 +106,7 @@ pub fn lookup(db_path: &Path, word: &str) -> Result<ThesaurusEntry> {
         // Get pos + definition for this sense (may not exist if only relations)
         let meta: (Option<String>, Option<String>) = {
             let mut stmt = conn.prepare(
-                "SELECT pos, definition FROM senses WHERE word = ?1 COLLATE NOCASE AND sense_idx = ?2 LIMIT 1"
+                "SELECT pos, definition FROM senses WHERE word = ?1 COLLATE NOCASE AND word = ?1 AND sense_idx = ?2 LIMIT 1"
             )?;
             stmt.query_row(params![word, idx], |r| Ok((r.get(0)?, r.get(1)?)))
                 .unwrap_or((None, None))
@@ -104,7 +114,7 @@ pub fn lookup(db_path: &Path, word: &str) -> Result<ThesaurusEntry> {
 
         let mut syn_stmt = conn.prepare(
             "SELECT DISTINCT related FROM relations \
-             WHERE word = ?1 COLLATE NOCASE AND kind = 'syn' AND sense_idx = ?2 AND related <> ?1"
+             WHERE word = ?1 COLLATE NOCASE AND word = ?1 AND kind = 'syn' AND sense_idx = ?2 AND related <> ?1"
         )?;
         let synonyms: Vec<String> = syn_stmt
             .query_map(params![word, idx], |r| r.get(0))?
@@ -112,7 +122,7 @@ pub fn lookup(db_path: &Path, word: &str) -> Result<ThesaurusEntry> {
 
         let mut ant_stmt = conn.prepare(
             "SELECT DISTINCT related FROM relations \
-             WHERE word = ?1 COLLATE NOCASE AND kind = 'ant' AND sense_idx = ?2 AND related <> ?1"
+             WHERE word = ?1 COLLATE NOCASE AND word = ?1 AND kind = 'ant' AND sense_idx = ?2 AND related <> ?1"
         )?;
         let antonyms: Vec<String> = ant_stmt
             .query_map(params![word, idx], |r| r.get(0))?
