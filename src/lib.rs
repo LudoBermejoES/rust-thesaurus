@@ -54,8 +54,8 @@ impl EngineConfig {
         Self {
             data_dir,
             lang: "en".into(),
-            source_url: "https://raw.githubusercontent.com/LudoBermejoES/corylus-thesaurus/master/thesaurus/derived/en_dict_v2.jsonl.gz".into(),
-            source_sha256: "db0c78b48e7a70b14e26da4dfb15e691766537d1b14de8f9aa38e3dfc596b045".into(),
+            source_url: "https://raw.githubusercontent.com/LudoBermejoES/corylus-thesaurus/master/thesaurus/derived/en_dict_v3.jsonl.gz".into(),
+            source_sha256: "477fd3527b8feb152f372cd71ca5f25c8f4f63512dd643c104909e75b1a9a724".into(),
         }
     }
 
